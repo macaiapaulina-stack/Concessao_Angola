@@ -152,7 +152,7 @@ function loadAndRenderLayers() {
         updateProgress('Concessões renderizadas', 70);
         
         // Adiciona popups/tooltips depois de forma assíncrona
-        requestIdleCallback(() => {
+        const addConcessaoLabels = () => {
             concessaoLayerGeo.eachLayer(l => {
                 if (l.feature) {
                     l.bindPopup(buildPopupContent(l.feature.properties));
@@ -166,7 +166,12 @@ function loadAndRenderLayers() {
                     }
                 }
             });
-        }, { timeout: 2000 });
+        };
+        if (window.requestIdleCallback) {
+            requestIdleCallback(addConcessaoLabels, { timeout: 2000 });
+        } else {
+            setTimeout(addConcessaoLabels, 1000);
+        }
     });
     
     // Renderiza poços de forma assíncrona
@@ -187,7 +192,7 @@ function loadAndRenderLayers() {
             updateProgress('Poços renderizados', 95);
             
             // Adiciona popups/tooltips depois de forma assíncrona
-            requestIdleCallback(() => {
+            const addPocosLabels = () => {
                 pocosLayerGeo.eachLayer(m => {
                     if (m.feature) {
                         m.bindPopup(buildPopupContent(m.feature.properties));
@@ -202,7 +207,12 @@ function loadAndRenderLayers() {
                         }
                     }
                 });
-            }, { timeout: 2000 });
+            };
+            if (window.requestIdleCallback) {
+                requestIdleCallback(addPocosLabels, { timeout: 2000 });
+            } else {
+                setTimeout(addPocosLabels, 1000);
+            }
             
             showStatus('Camadas carregadas!', false);
             
