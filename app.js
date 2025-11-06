@@ -1,9 +1,13 @@
-// Inicializa o mapa centrado em Angola com zoom maior
+// Inicializa o mapa centrado em Angola com otimizações de navegação
 const map = L.map('map', {
     zoomControl: true,
     attributionControl: true,
-    preferCanvas: true // melhora performance para muitas features
-}).setView([-11.2027, 17.8739], 8); // zoom 8 em vez de 6
+    preferCanvas: true,           // renderer mais leve
+    wheelDebounceTime: 60,        // suaviza o scroll
+    wheelPxPerZoomLevel: 80,      // menos sensível
+    zoomSnap: 0.25,
+    zoomDelta: 0.5
+}).setView([-11.2027, 17.8739], 7);
 
 // Panes para controlar ordem de desenho (z-index)
 map.createPane('paneConcessao');
@@ -141,6 +145,8 @@ function loadAndRenderLayers() {
         const concessaoLayerGeo = L.geoJSON(concessaoData, {
             style: concessaoStyle,
             pane: 'paneConcessao',
+            renderer: L.canvas(),
+            smoothFactor: 1.2,
             onEachFeature: (f, l) => {
                 l.feature = f;
                 l.on('mouseover', () => l.setStyle({ weight: 3, fillOpacity: 0.35 }));
@@ -151,19 +157,33 @@ function loadAndRenderLayers() {
         window.concessaoLayer.addLayer(concessaoLayerGeo);
         updateProgress('Concessões renderizadas', 70);
         
+        // Faz zoom automático na área das concessões
+        try {
+            const bounds = concessaoLayerGeo.getBounds();
+            if (bounds && bounds.isValid()) {
+                map.fitBounds(bounds, {
+                    padding: [50, 50], // padding para não cortar bordas
+                    maxZoom: 12 // zoom máximo para não aproximar demais
+                });
+            }
+        } catch (e) {
+            console.warn('Erro ao ajustar zoom nas concessões:', e);
+        }
+        
         // Adiciona popups/tooltips depois de forma assíncrona
         const addConcessaoLabels = () => {
             concessaoLayerGeo.eachLayer(l => {
-                if (l.feature) {
-                    l.bindPopup(buildPopupContent(l.feature.properties));
-                    const nome = getConcessaoNome(l.feature.properties);
-                    if (nome && map.getZoom() >= 7) {
-                        l.bindTooltip(String(nome), {
-                            permanent: true,
-                            direction: 'center',
-                            className: 'label-concessao'
-                        });
-                    }
+                if (!l.feature) return;
+                // popup sob demanda para reduzir custo
+                l.off('click');
+                l.on('click', () => l.bindPopup(buildPopupContent(l.feature.properties)).openPopup());
+                // rótulo somente em hover e sem permanência (mais leve)
+                const nome = getConcessaoNome(l.feature.properties);
+                if (nome) {
+                    l.off('mouseover');
+                    l.on('mouseover', () => {
+                        l.bindTooltip(String(nome), { direction: 'center', sticky: true, className: 'label-concessao' }).openTooltip();
+                    });
                 }
             });
         };
@@ -194,18 +214,11 @@ function loadAndRenderLayers() {
             // Adiciona popups/tooltips depois de forma assíncrona
             const addPocosLabels = () => {
                 pocosLayerGeo.eachLayer(m => {
-                    if (m.feature) {
-                        m.bindPopup(buildPopupContent(m.feature.properties));
-                        const nome = getPocoNome(m.feature.properties);
-                        if (nome && map.getZoom() >= 7) {
-                            m.bindTooltip(String(nome), {
-                                permanent: true,
-                                direction: 'top',
-                                offset: [0, -6],
-                                className: 'label-pocos'
-                            });
-                        }
-                    }
+                    if (!m.feature) return;
+                    // popup sob demanda
+                    m.off('click');
+                    m.on('click', () => m.bindPopup(buildPopupContent(m.feature.properties)).openPopup());
+                    // sem rótulos permanentes para reduzir custo visual
                 });
             };
             if (window.requestIdleCallback) {
@@ -214,6 +227,14 @@ function loadAndRenderLayers() {
                 setTimeout(addPocosLabels, 1000);
             }
             
+            // Após desenhar concessões, centraliza na área das concessões com zoom máximo controlado
+            try {
+                const b = window.concessaoLayer.getBounds();
+                if (b && b.isValid()) {
+                    map.fitBounds(b, { padding: [30, 30], maxZoom: 9 });
+                }
+            } catch (_) {}
+
             showStatus('Camadas carregadas!', false);
             
             setTimeout(() => {
