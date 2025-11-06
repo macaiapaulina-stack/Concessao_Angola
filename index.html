@@ -18,8 +18,8 @@
 <body>
     <div id="map" aria-label="Mapa WebGIS"></div>
 
-    <!-- Painel de acesso rápido (links e copiar) -->
-    <div id="access-panel" style="position:absolute;z-index:1100;bottom:12px;left:12px;background:rgba(255,255,255,0.9);padding:8px 10px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.15);font-family:system-ui, Arial, sans-serif;font-size:13px;line-height:1.4;">
+    <!-- Painel de acesso rápido (links e copiar) - só aparece em localhost -->
+    <div id="access-panel" style="position:absolute;z-index:1100;bottom:12px;left:12px;background:rgba(255,255,255,0.9);padding:8px 10px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.15);font-family:system-ui, Arial, sans-serif;font-size:13px;line-height:1.4;display:none;">
         <div style="margin-bottom:6px;font-weight:600;">Acesso rápido ao servidor</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
             <a href="http://localhost:8000/" target="_blank" rel="noopener">localhost:8000</a>
@@ -30,6 +30,12 @@
         </div>
         <div id="copy-status" style="margin-top:4px;color:#059669;display:none;">Link copiado!</div>
     </div>
+    <script>
+        // Mostra painel de acesso rápido apenas em localhost
+        if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+            document.getElementById('access-panel').style.display = 'block';
+        }
+    </script>
 
     <!-- Leaflet JS com fallback e carregamento de plugins antes do app.js -->
     <script>
@@ -131,22 +137,31 @@
     </div>
     <div class="opacity-panel">
         <div style="font-weight:600; margin-bottom:4px;">Opacidade Concessão</div>
-        <input id="opacity-range" type="range" min="0" max="1" step="0.05" value="0.25">
+        <div style="display:flex;align-items:center;gap:8px;">
+            <input id="opacity-range" type="range" min="0" max="1" step="0.05" value="0.25" style="flex:1;">
+            <span id="opacity-value" style="min-width:45px;text-align:right;font-weight:600;">25%</span>
+        </div>
     </div>
 
     <script>
         (function(){
             var range = document.getElementById('opacity-range');
+            var valueDisplay = document.getElementById('opacity-value');
             if (!range) return;
-            range.addEventListener('input', function(){
-                var val = parseFloat(range.value);
+            function updateOpacity(val) {
+                var percent = Math.round(val * 100);
+                if (valueDisplay) valueDisplay.textContent = percent + '%';
                 try {
                     // percorre camadas da concessão e ajusta fillOpacity
                     window.concessaoLayer && window.concessaoLayer.eachLayer(function(l){
                         if (l.setStyle) l.setStyle({ fillOpacity: val });
                     });
                 } catch(_) {}
+            }
+            range.addEventListener('input', function(){
+                updateOpacity(parseFloat(range.value));
             });
+            updateOpacity(0.25); // inicializa display
         })();
     </script>
 </body>

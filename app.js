@@ -221,6 +221,11 @@ Promise.allSettled([concessaoPromise, pocosPromise]).then(results => {
         }
     }
     showStatus('Camadas carregadas.', false);
+    // Esconde banner após 3 segundos
+    setTimeout(() => {
+        const banner = document.getElementById('status-banner');
+        if (banner) banner.style.display = 'none';
+    }, 3000);
 }).catch(() => {
     showStatus('Erro ao carregar camadas.', true);
 });
