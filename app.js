@@ -117,6 +117,9 @@ function showStatus(message, isError) {
 
 showStatus('Carregando camadas...', false);
 
+// Flag para controlar se deve criar rótulos durante carregamento inicial
+let isLoadingInitial = true;
+
 // Função para mostrar progresso de carregamento
 function updateProgress(message, percent) {
     const banner = document.getElementById('status-banner');
@@ -133,9 +136,9 @@ const concessaoPromise = fetch('./Concessao_Angola_2025.geojson?cb=' + Date.now(
     })
     .then(geojson => {
         updateProgress('Processando Concessões...', 50);
-        // Processa em chunks pequenos usando requestAnimationFrame para não bloquear UI
+        // Processa em chunks MUITO pequenos com delay maior para não travar UI
         const features = geojson.features || [];
-        const chunkSize = 10; // chunks menores para não travar
+        const chunkSize = 5; // chunks muito pequenos
         let processed = 0;
         const total = features.length;
         
@@ -144,47 +147,70 @@ const concessaoPromise = fetch('./Concessao_Angola_2025.geojson?cb=' + Date.now(
             
             // Processa chunk atual
             for (let i = start; i < end; i++) {
-                const feature = features[i];
-                const layerEl = L.geoJSON(feature, {
-                    style: concessaoStyle,
-                    pane: 'paneConcessao',
-                    onEachFeature: (f, l) => {
-                        l.bindPopup(buildPopupContent(f.properties));
-                        const nome = getConcessaoNome(f.properties);
-                        if (nome) {
-                            l.bindTooltip(String(nome), {
-                                permanent: true,
-                                direction: 'center',
-                                className: 'label-concessao'
-                            });
+                try {
+                    const feature = features[i];
+                    const layerEl = L.geoJSON(feature, {
+                        style: concessaoStyle,
+                        pane: 'paneConcessao',
+                        onEachFeature: (f, l) => {
+                            l.feature = f; // guarda referência da feature
+                            l.bindPopup(buildPopupContent(f.properties));
+                            // Só cria rótulos após carregamento inicial para não travar
+                            if (!isLoadingInitial) {
+                                const nome = getConcessaoNome(f.properties);
+                                if (nome && map.getZoom() >= 7) {
+                                    l.bindTooltip(String(nome), {
+                                        permanent: true,
+                                        direction: 'center',
+                                        className: 'label-concessao'
+                                    });
+                                }
+                            }
+                            l.on('mouseover', () => l.setStyle({ weight: 3, fillOpacity: 0.35 }));
+                            l.on('mouseout', () => l.setStyle(concessaoStyle));
                         }
-                        l.on('mouseover', () => l.setStyle({ weight: 3, fillOpacity: 0.35 }));
-                        l.on('mouseout', () => l.setStyle(concessaoStyle));
-                    }
-                });
-                concessaoLayer.addLayer(layerEl);
+                    });
+                    concessaoLayer.addLayer(layerEl);
+                } catch (e) {
+                    console.warn('Erro ao processar feature:', i, e);
+                }
             }
             
             processed = end;
             const percent = 50 + Math.floor((processed / total) * 20); // 50-70%
-            updateProgress(`Processando Concessões... ${processed}/${total}`, percent);
+            updateProgress(`Concessões: ${processed}/${total}`, percent);
             
-            // Continua processamento de forma assíncrona
+            // Continua processamento com delay maior para não bloquear UI
             if (processed < total) {
-                // Usa setTimeout com delay mínimo para dar tempo ao navegador processar eventos
-                setTimeout(() => requestAnimationFrame(() => processChunk(end)), 0);
+                // Delay de 16ms (1 frame a 60fps) para dar tempo ao navegador
+                setTimeout(() => {
+                    // Usa requestIdleCallback se disponível, senão setTimeout
+                    if (window.requestIdleCallback) {
+                        requestIdleCallback(() => processChunk(end), { timeout: 50 });
+                    } else {
+                        requestAnimationFrame(() => processChunk(end));
+                    }
+                }, 16);
             } else {
                 updateProgress('Concessões carregadas', 70);
-                try {
-                    const b = concessaoLayer.getBounds();
-                    if (b && b.isValid()) map.fitBounds(b.pad(0.1));
-                } catch (_) {}
-                console.log('Concessao carregada:', processed, 'geometrias');
+                setTimeout(() => {
+                    try {
+                        const b = concessaoLayer.getBounds();
+                        if (b && b.isValid()) map.fitBounds(b.pad(0.1));
+                    } catch (_) {}
+                    console.log('Concessao carregada:', processed, 'geometrias');
+                }, 100);
             }
         }
         
-        // Inicia processamento assíncrono
-        requestAnimationFrame(() => processChunk(0));
+        // Inicia processamento assíncrono após um pequeno delay
+        setTimeout(() => {
+            if (window.requestIdleCallback) {
+                requestIdleCallback(() => processChunk(0), { timeout: 100 });
+            } else {
+                requestAnimationFrame(() => processChunk(0));
+            }
+        }, 100);
         
         return concessaoLayer;
     })
@@ -202,9 +228,9 @@ const pocosPromise = fetch('./pocos_angola.geojson?cb=' + Date.now())
     })
     .then(geojson => {
         updateProgress('Processando Poços...', 80);
-        // Processa poços em chunks usando requestAnimationFrame
+        // Processa poços em chunks menores com delay
         const features = geojson.features || [];
-        const chunkSize = 50; // chunks maiores para pontos (são mais leves)
+        const chunkSize = 20; // chunks menores para não travar
         let processed = 0;
         const total = features.length;
         
@@ -213,45 +239,66 @@ const pocosPromise = fetch('./pocos_angola.geojson?cb=' + Date.now())
             
             // Processa chunk atual
             for (let i = start; i < end; i++) {
-                const feature = features[i];
-                const marker = L.circleMarker(
-                    [feature.geometry.coordinates[1], feature.geometry.coordinates[0]], 
-                    pocosStyle
-                );
-                marker.bindPopup(buildPopupContent(feature.properties));
-                const nome = getPocoNome(feature.properties);
-                if (nome) {
-                    marker.bindTooltip(String(nome), {
-                        permanent: true,
-                        direction: 'top',
-                        offset: [0, -6],
-                        className: 'label-pocos'
-                    });
+                try {
+                    const feature = features[i];
+                    const marker = L.circleMarker(
+                        [feature.geometry.coordinates[1], feature.geometry.coordinates[0]], 
+                        pocosStyle
+                    );
+                    marker.feature = feature; // guarda referência da feature
+                    marker.bindPopup(buildPopupContent(feature.properties));
+                    // Só cria rótulos após carregamento inicial
+                    if (!isLoadingInitial) {
+                        const nome = getPocoNome(feature.properties);
+                        if (nome && map.getZoom() >= 7) {
+                            marker.bindTooltip(String(nome), {
+                                permanent: true,
+                                direction: 'top',
+                                offset: [0, -6],
+                                className: 'label-pocos'
+                            });
+                        }
+                    }
+                    pocosCluster.addLayer(marker);
+                } catch (e) {
+                    console.warn('Erro ao processar poço:', i, e);
                 }
-                pocosCluster.addLayer(marker);
             }
             
             processed = end;
             const percent = 80 + Math.floor((processed / total) * 15); // 80-95%
-            updateProgress(`Processando Poços... ${processed}/${total}`, percent);
+            updateProgress(`Poços: ${processed}/${total}`, percent);
             
-            // Continua processamento de forma assíncrona
+            // Continua processamento com delay maior
             if (processed < total) {
-                // Usa setTimeout com delay mínimo para dar tempo ao navegador processar eventos
-                setTimeout(() => requestAnimationFrame(() => processChunk(end)), 0);
+                setTimeout(() => {
+                    if (window.requestIdleCallback) {
+                        requestIdleCallback(() => processChunk(end), { timeout: 50 });
+                    } else {
+                        requestAnimationFrame(() => processChunk(end));
+                    }
+                }, 16);
             } else {
                 pocosCluster.bringToFront();
                 updateProgress('Poços carregados', 95);
-                try {
-                    const b = pocosCluster.getBounds();
-                    if (b && b.isValid()) map.fitBounds(b.pad(0.1));
-                } catch (_) {}
-                console.log('Poços carregados:', processed, 'pontos');
+                setTimeout(() => {
+                    try {
+                        const b = pocosCluster.getBounds();
+                        if (b && b.isValid()) map.fitBounds(b.pad(0.1));
+                    } catch (_) {}
+                    console.log('Poços carregados:', processed, 'pontos');
+                }, 100);
             }
         }
         
-        // Inicia processamento assíncrono
-        requestAnimationFrame(() => processChunk(0));
+        // Inicia processamento assíncrono após delay
+        setTimeout(() => {
+            if (window.requestIdleCallback) {
+                requestIdleCallback(() => processChunk(0), { timeout: 100 });
+            } else {
+                requestAnimationFrame(() => processChunk(0));
+            }
+        }, 100);
         
         return pocosCluster;
     })
@@ -290,6 +337,44 @@ Promise.allSettled([concessaoPromise, pocosPromise]).then(results => {
         }
     }
     showStatus('Camadas carregadas!', false);
+    // Marca que carregamento inicial terminou e adiciona rótulos
+    isLoadingInitial = false;
+    
+    // Adiciona rótulos agora que tudo carregou
+    setTimeout(() => {
+        concessaoLayer.eachLayer(l => {
+            if (!l.getTooltip()) {
+                const props = l.feature?.properties;
+                if (props && map.getZoom() >= 7) {
+                    const nome = getConcessaoNome(props);
+                    if (nome) {
+                        l.bindTooltip(String(nome), {
+                            permanent: true,
+                            direction: 'center',
+                            className: 'label-concessao'
+                        });
+                    }
+                }
+            }
+        });
+        pocosCluster.eachLayer(m => {
+            if (!m.getTooltip()) {
+                const props = m.feature?.properties;
+                if (props && map.getZoom() >= 7) {
+                    const nome = getPocoNome(props);
+                    if (nome) {
+                        m.bindTooltip(String(nome), {
+                            permanent: true,
+                            direction: 'top',
+                            offset: [0, -6],
+                            className: 'label-pocos'
+                        });
+                    }
+                }
+            }
+        });
+    }, 500);
+    
     // Esconde banner após 2 segundos
     setTimeout(() => {
         const banner = document.getElementById('status-banner');
