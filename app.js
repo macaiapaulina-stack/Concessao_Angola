@@ -1,8 +1,9 @@
-// Inicializa o mapa centrado em Angola
+// Inicializa o mapa centrado em Angola com zoom maior
 const map = L.map('map', {
     zoomControl: true,
-    attributionControl: true
-}).setView([-11.2027, 17.8739], 6);
+    attributionControl: true,
+    preferCanvas: true // melhora performance para muitas features
+}).setView([-11.2027, 17.8739], 8); // zoom 8 em vez de 6
 
 // Panes para controlar ordem de desenho (z-index)
 map.createPane('paneConcessao');
@@ -128,16 +129,16 @@ function updateProgress(message, percent) {
     }
 }
 
-// Função para carregar e renderizar camadas
+// Função para carregar e renderizar camadas de forma não-bloqueante
 function loadAndRenderLayers() {
     if (!concessaoData || !pocosData) return;
     
     showStatus('Renderizando camadas...', false);
     
-    // Renderiza concessões
-    setTimeout(() => {
+    // Renderiza concessões de forma assíncrona
+    requestAnimationFrame(() => {
         updateProgress('Renderizando Concessões...', 50);
-        const concessaoLayer = L.geoJSON(concessaoData, {
+        const concessaoLayerGeo = L.geoJSON(concessaoData, {
             style: concessaoStyle,
             pane: 'paneConcessao',
             onEachFeature: (f, l) => {
@@ -147,12 +148,12 @@ function loadAndRenderLayers() {
             }
         });
         
-        window.concessaoLayer.addLayer(concessaoLayer);
+        window.concessaoLayer.addLayer(concessaoLayerGeo);
         updateProgress('Concessões renderizadas', 70);
         
-        // Adiciona popups/tooltips depois
-        setTimeout(() => {
-            concessaoLayer.eachLayer(l => {
+        // Adiciona popups/tooltips depois de forma assíncrona
+        requestIdleCallback(() => {
+            concessaoLayerGeo.eachLayer(l => {
                 if (l.feature) {
                     l.bindPopup(buildPopupContent(l.feature.properties));
                     const nome = getConcessaoNome(l.feature.properties);
@@ -165,73 +166,56 @@ function loadAndRenderLayers() {
                     }
                 }
             });
-        }, 1000);
-    }, 100);
+        }, { timeout: 2000 });
+    });
     
-    // Renderiza poços
-    setTimeout(() => {
-        updateProgress('Renderizando Poços...', 80);
-        const pocosLayer = L.geoJSON(pocosData, {
-            pane: 'panePocos',
-            pointToLayer: (feature, latlng) => {
-                const marker = L.circleMarker(latlng, pocosStyle);
-                marker.feature = feature;
-                return marker;
-            }
-        });
-        
-        window.pocosCluster.addLayer(pocosLayer);
-        window.pocosCluster.bringToFront();
-        updateProgress('Poços renderizados', 95);
-        
-        // Adiciona popups/tooltips depois
+    // Renderiza poços de forma assíncrona
+    requestAnimationFrame(() => {
         setTimeout(() => {
-            pocosLayer.eachLayer(m => {
-                if (m.feature) {
-                    m.bindPopup(buildPopupContent(m.feature.properties));
-                    const nome = getPocoNome(m.feature.properties);
-                    if (nome && map.getZoom() >= 7) {
-                        m.bindTooltip(String(nome), {
-                            permanent: true,
-                            direction: 'top',
-                            offset: [0, -6],
-                            className: 'label-pocos'
-                        });
-                    }
+            updateProgress('Renderizando Poços...', 80);
+            const pocosLayerGeo = L.geoJSON(pocosData, {
+                pane: 'panePocos',
+                pointToLayer: (feature, latlng) => {
+                    const marker = L.circleMarker(latlng, pocosStyle);
+                    marker.feature = feature;
+                    return marker;
                 }
             });
-        }, 1000);
-        
-        showStatus('Camadas carregadas!', false);
-        
-        // Ajusta a visualização para mostrar 100% dos dados
-        setTimeout(() => {
-            try {
-                const allLayers = L.featureGroup([
-                    window.concessaoLayer,
-                    window.pocosCluster
-                ]);
-                const bounds = allLayers.getBounds();
-                if (bounds && bounds.isValid()) {
-                    map.fitBounds(bounds, {
-                        padding: [20, 20], // padding mínimo para não cortar
-                        maxZoom: 10 // limita zoom máximo para não aproximar demais
-                    });
+            
+            window.pocosCluster.addLayer(pocosLayerGeo);
+            window.pocosCluster.bringToFront();
+            updateProgress('Poços renderizados', 95);
+            
+            // Adiciona popups/tooltips depois de forma assíncrona
+            requestIdleCallback(() => {
+                pocosLayerGeo.eachLayer(m => {
+                    if (m.feature) {
+                        m.bindPopup(buildPopupContent(m.feature.properties));
+                        const nome = getPocoNome(m.feature.properties);
+                        if (nome && map.getZoom() >= 7) {
+                            m.bindTooltip(String(nome), {
+                                permanent: true,
+                                direction: 'top',
+                                offset: [0, -6],
+                                className: 'label-pocos'
+                            });
+                        }
+                    }
+                });
+            }, { timeout: 2000 });
+            
+            showStatus('Camadas carregadas!', false);
+            
+            setTimeout(() => {
+                const banner = document.getElementById('status-banner');
+                if (banner) {
+                    banner.style.transition = 'opacity 0.5s';
+                    banner.style.opacity = '0';
+                    setTimeout(() => banner.style.display = 'none', 500);
                 }
-            } catch (e) {
-                console.warn('Erro ao ajustar bounds:', e);
-            }
-        }, 1500);
-        
-        setTimeout(() => {
-            const banner = document.getElementById('status-banner');
-            if (banner) {
-                banner.style.transition = 'opacity 0.5s';
-                banner.style.opacity = '0';
-                setTimeout(() => banner.style.display = 'none', 500);
-            }
-        }, 2000);
-    }, 500);
+            }, 2000);
+        }, 100);
+    });
 }
 
 // Carrega dados JSON primeiro (sem renderizar)
