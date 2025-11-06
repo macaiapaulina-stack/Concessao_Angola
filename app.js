@@ -117,37 +117,70 @@ function showStatus(message, isError) {
 
 showStatus('Carregando camadas...', false);
 
+// Função para mostrar progresso de carregamento
+function updateProgress(message, percent) {
+    const banner = document.getElementById('status-banner');
+    if (banner) {
+        banner.textContent = message + (percent !== undefined ? ` (${percent}%)` : '');
+    }
+}
+
 const concessaoPromise = fetch('./Concessao_Angola_2025.geojson?cb=' + Date.now())
     .then(r => {
         if (!r.ok) throw new Error('Falha ao carregar Concessao_Angola_2025.geojson');
+        updateProgress('Carregando Concessões...', 30);
         return r.json();
     })
     .then(geojson => {
-        const layer = L.geoJSON(geojson, {
-            style: concessaoStyle,
-            pane: 'paneConcessao',
-            onEachFeature: (feature, layerEl) => {
-                layerEl.bindPopup(buildPopupContent(feature.properties));
-                const nome = getConcessaoNome(feature.properties);
-                if (nome) {
-                    layerEl.bindTooltip(String(nome), {
-                        permanent: true,
-                        direction: 'center',
-                        className: 'label-concessao'
-                    });
-                }
-                // destaque on hover
-                layerEl.on('mouseover', () => layerEl.setStyle({ weight: 3, fillOpacity: 0.35 }));
-                layerEl.on('mouseout', () => layerEl.setStyle(concessaoStyle));
+        updateProgress('Processando Concessões...', 50);
+        // Carrega em chunks para não travar o navegador
+        const features = geojson.features || [];
+        const chunkSize = 50;
+        let processed = 0;
+        
+        function processChunk(start) {
+            const end = Math.min(start + chunkSize, features.length);
+            for (let i = start; i < end; i++) {
+                const feature = features[i];
+                const layerEl = L.geoJSON(feature, {
+                    style: concessaoStyle,
+                    pane: 'paneConcessao'
+                }).eachLayer(l => {
+                    l.feature = feature; // guarda referência da feature
+                    l.bindPopup(buildPopupContent(feature.properties));
+                    const nome = getConcessaoNome(feature.properties);
+                    if (nome) {
+                        l.bindTooltip(String(nome), {
+                            permanent: true,
+                            direction: 'center',
+                            className: 'label-concessao'
+                        });
+                    }
+                    l.on('mouseover', () => l.setStyle({ weight: 3, fillOpacity: 0.35 }));
+                    l.on('mouseout', () => l.setStyle(concessaoStyle));
+                });
+                concessaoLayer.addLayer(layerEl);
             }
-        }).bringToFront();
-        layer.addTo(concessaoLayer);
-        try {
-            const b = layer.getBounds();
-            if (b && b.isValid()) map.fitBounds(b.pad(0.1));
-        } catch (_) {}
-        console.log('Concessao carregada:', layer.getLayers().length, 'geometrias');
-        return layer;
+            processed = end;
+            if (processed < features.length) {
+                setTimeout(() => processChunk(end), 10);
+            } else {
+                updateProgress('Concessões carregadas', 70);
+            }
+        }
+        
+        processChunk(0);
+        
+        // Ajusta bounds quando terminar
+        setTimeout(() => {
+            try {
+                const b = concessaoLayer.getBounds();
+                if (b && b.isValid()) map.fitBounds(b.pad(0.1));
+            } catch (_) {}
+            console.log('Concessao carregada:', processed, 'geometrias');
+        }, 100);
+        
+        return concessaoLayer;
     })
     .catch(err => {
         console.error(err);
@@ -158,33 +191,54 @@ const concessaoPromise = fetch('./Concessao_Angola_2025.geojson?cb=' + Date.now(
 const pocosPromise = fetch('./pocos_angola.geojson?cb=' + Date.now())
     .then(r => {
         if (!r.ok) throw new Error('Falha ao carregar pocos_angola.geojson');
+        updateProgress('Carregando Poços...', 80);
         return r.json();
     })
     .then(geojson => {
-        const layer = L.geoJSON(geojson, {
-            pane: 'panePocos',
-            pointToLayer: (feature, latlng) => L.circleMarker(latlng, pocosStyle),
-            onEachFeature: (feature, layerEl) => {
-                layerEl.bindPopup(buildPopupContent(feature.properties));
+        updateProgress('Processando Poços...', 90);
+        // Processa poços em chunks também
+        const features = geojson.features || [];
+        const chunkSize = 100;
+        let processed = 0;
+        
+        function processChunk(start) {
+            const end = Math.min(start + chunkSize, features.length);
+            for (let i = start; i < end; i++) {
+                const feature = features[i];
+                const marker = L.circleMarker([feature.geometry.coordinates[1], feature.geometry.coordinates[0]], pocosStyle);
+                marker.feature = feature; // guarda referência da feature
+                marker.bindPopup(buildPopupContent(feature.properties));
                 const nome = getPocoNome(feature.properties);
                 if (nome) {
-                    layerEl.bindTooltip(String(nome), {
+                    marker.bindTooltip(String(nome), {
                         permanent: true,
                         direction: 'top',
                         offset: [0, -6],
                         className: 'label-pocos'
                     });
                 }
+                pocosCluster.addLayer(marker);
             }
-        }).bringToFront();
-        pocosCluster.addLayer(layer);
-        pocosCluster.bringToFront();
-        try {
-            const b = layer.getBounds();
-            if (b && b.isValid()) map.fitBounds(b.pad(0.1));
-        } catch (_) {}
-        console.log('Poços carregados:', layer.getLayers().length, 'pontos');
-        return layer;
+            processed = end;
+            if (processed < features.length) {
+                setTimeout(() => processChunk(end), 10);
+            } else {
+                updateProgress('Poços carregados', 95);
+                pocosCluster.bringToFront();
+            }
+        }
+        
+        processChunk(0);
+        
+        setTimeout(() => {
+            try {
+                const b = pocosCluster.getBounds();
+                if (b && b.isValid()) map.fitBounds(b.pad(0.1));
+            } catch (_) {}
+            console.log('Poços carregados:', processed, 'pontos');
+        }, 100);
+        
+        return pocosCluster;
     })
     .catch(err => {
         console.error(err);
@@ -220,12 +274,16 @@ Promise.allSettled([concessaoPromise, pocosPromise]).then(results => {
             // silencioso
         }
     }
-    showStatus('Camadas carregadas.', false);
-    // Esconde banner após 3 segundos
+    showStatus('Camadas carregadas!', false);
+    // Esconde banner após 2 segundos
     setTimeout(() => {
         const banner = document.getElementById('status-banner');
-        if (banner) banner.style.display = 'none';
-    }, 3000);
+        if (banner) {
+            banner.style.transition = 'opacity 0.5s';
+            banner.style.opacity = '0';
+            setTimeout(() => banner.style.display = 'none', 500);
+        }
+    }, 2000);
 }).catch(() => {
     showStatus('Erro ao carregar camadas.', true);
 });
@@ -235,13 +293,14 @@ function updateLabelsVisibility() {
     const container = document.getElementById('map');
     if (!container) return;
     const z = map.getZoom();
-    if (z < 7) {
-        container.classList.add('labels-hidden');
-    } else {
+    if (z >= 7) {
         container.classList.remove('labels-hidden');
+    } else {
+        container.classList.add('labels-hidden');
     }
 }
 map.on('zoomend', updateLabelsVisibility);
+map.on('zoom', updateLabelsVisibility);
 updateLabelsVisibility();
 
 // --- Controles adicionais ---
