@@ -203,6 +203,26 @@ function loadAndRenderLayers() {
         }, 1000);
         
         showStatus('Camadas carregadas!', false);
+        
+        // Ajusta a visualização para mostrar 100% dos dados
+        setTimeout(() => {
+            try {
+                const allLayers = L.featureGroup([
+                    window.concessaoLayer,
+                    window.pocosCluster
+                ]);
+                const bounds = allLayers.getBounds();
+                if (bounds && bounds.isValid()) {
+                    map.fitBounds(bounds, {
+                        padding: [20, 20], // padding mínimo para não cortar
+                        maxZoom: 10 // limita zoom máximo para não aproximar demais
+                    });
+                }
+            } catch (e) {
+                console.warn('Erro ao ajustar bounds:', e);
+            }
+        }, 1500);
+        
         setTimeout(() => {
             const banner = document.getElementById('status-banner');
             if (banner) {
