@@ -115,10 +115,10 @@ function showStatus(message, isError) {
     el.style.background = isError ? 'rgba(185, 28, 28, 0.85)' : 'rgba(0,0,0,0.6)';
 }
 
-showStatus('Carregando camadas...', false);
-
-// Flag para controlar se deve criar rótulos durante carregamento inicial
+// Flag para controlar carregamento
 let isLoadingInitial = true;
+let concessaoData = null;
+let pocosData = null;
 
 // Função para mostrar progresso de carregamento
 function updateProgress(message, percent) {
@@ -128,32 +128,31 @@ function updateProgress(message, percent) {
     }
 }
 
-const concessaoPromise = fetch('./Concessao_Angola_2025.geojson?cb=' + Date.now())
-    .then(r => {
-        if (!r.ok) throw new Error('Falha ao carregar Concessao_Angola_2025.geojson');
-        updateProgress('Carregando Concessões...', 30);
-        return r.json();
-    })
-    .then(geojson => {
-        updateProgress('Processando Concessões...', 50);
-        // Carrega tudo de uma vez usando L.geoJSON (otimizado) mas sem tooltips/popups inicialmente
-        const layer = L.geoJSON(geojson, {
+// Função para carregar e renderizar camadas
+function loadAndRenderLayers() {
+    if (!concessaoData || !pocosData) return;
+    
+    showStatus('Renderizando camadas...', false);
+    
+    // Renderiza concessões
+    setTimeout(() => {
+        updateProgress('Renderizando Concessões...', 50);
+        const concessaoLayer = L.geoJSON(concessaoData, {
             style: concessaoStyle,
             pane: 'paneConcessao',
             onEachFeature: (f, l) => {
-                l.feature = f; // guarda referência
-                // Popup e tooltip serão adicionados depois
+                l.feature = f;
                 l.on('mouseover', () => l.setStyle({ weight: 3, fillOpacity: 0.35 }));
                 l.on('mouseout', () => l.setStyle(concessaoStyle));
             }
         });
         
-        concessaoLayer.addLayer(layer);
-        updateProgress('Concessões carregadas', 70);
+        window.concessaoLayer.addLayer(concessaoLayer);
+        updateProgress('Concessões renderizadas', 70);
         
-        // Adiciona popups e tooltips depois de forma assíncrona
+        // Adiciona popups/tooltips depois
         setTimeout(() => {
-            layer.eachLayer(l => {
+            concessaoLayer.eachLayer(l => {
                 if (l.feature) {
                     l.bindPopup(buildPopupContent(l.feature.properties));
                     const nome = getConcessaoNome(l.feature.properties);
@@ -166,49 +165,28 @@ const concessaoPromise = fetch('./Concessao_Angola_2025.geojson?cb=' + Date.now(
                     }
                 }
             });
-        }, 500);
-        
-        try {
-            const b = layer.getBounds();
-            if (b && b.isValid()) map.fitBounds(b.pad(0.1));
-        } catch (_) {}
-        console.log('Concessao carregada:', layer.getLayers().length, 'geometrias');
-        return layer;
-    })
-    .catch(err => {
-        console.error(err);
-        showStatus('Erro ao carregar Concessao_Angola_2025.geojson', true);
-    });
-
-// Carrega GeoJSON de Poços (pontos)
-const pocosPromise = fetch('./pocos_angola.geojson?cb=' + Date.now())
-    .then(r => {
-        if (!r.ok) throw new Error('Falha ao carregar pocos_angola.geojson');
-        updateProgress('Carregando Poços...', 80);
-        return r.json();
-    })
-    .then(geojson => {
-        updateProgress('Processando Poços...', 80);
-        // Carrega tudo de uma vez usando L.geoJSON (otimizado) mas sem tooltips/popups inicialmente
-        const layer = L.geoJSON(geojson, {
+        }, 1000);
+    }, 100);
+    
+    // Renderiza poços
+    setTimeout(() => {
+        updateProgress('Renderizando Poços...', 80);
+        const pocosLayer = L.geoJSON(pocosData, {
             pane: 'panePocos',
             pointToLayer: (feature, latlng) => {
                 const marker = L.circleMarker(latlng, pocosStyle);
-                marker.feature = feature; // guarda referência
+                marker.feature = feature;
                 return marker;
-            },
-            onEachFeature: (f, l) => {
-                // Popup e tooltip serão adicionados depois
             }
         });
         
-        pocosCluster.addLayer(layer);
-        pocosCluster.bringToFront();
-        updateProgress('Poços carregados', 95);
+        window.pocosCluster.addLayer(pocosLayer);
+        window.pocosCluster.bringToFront();
+        updateProgress('Poços renderizados', 95);
         
-        // Adiciona popups e tooltips depois de forma assíncrona
+        // Adiciona popups/tooltips depois
         setTimeout(() => {
-            layer.eachLayer(m => {
+            pocosLayer.eachLayer(m => {
                 if (m.feature) {
                     m.bindPopup(buildPopupContent(m.feature.properties));
                     const nome = getPocoNome(m.feature.properties);
@@ -222,14 +200,52 @@ const pocosPromise = fetch('./pocos_angola.geojson?cb=' + Date.now())
                     }
                 }
             });
-        }, 500);
+        }, 1000);
         
-        try {
-            const b = layer.getBounds();
-            if (b && b.isValid()) map.fitBounds(b.pad(0.1));
-        } catch (_) {}
-        console.log('Poços carregados:', layer.getLayers().length, 'pontos');
-        return layer;
+        showStatus('Camadas carregadas!', false);
+        setTimeout(() => {
+            const banner = document.getElementById('status-banner');
+            if (banner) {
+                banner.style.transition = 'opacity 0.5s';
+                banner.style.opacity = '0';
+                setTimeout(() => banner.style.display = 'none', 500);
+            }
+        }, 2000);
+    }, 500);
+}
+
+// Carrega dados JSON primeiro (sem renderizar)
+showStatus('Carregando dados...', false);
+
+const concessaoPromise = fetch('./Concessao_Angola_2025.geojson?cb=' + Date.now())
+    .then(r => {
+        if (!r.ok) throw new Error('Falha ao carregar Concessao_Angola_2025.geojson');
+        updateProgress('Carregando Concessões...', 30);
+        return r.json();
+    })
+    .then(geojson => {
+        concessaoData = geojson;
+        updateProgress('Dados de Concessões carregados', 50);
+        console.log('Concessao dados carregados:', geojson.features?.length || 0, 'features');
+        return geojson;
+    })
+    .catch(err => {
+        console.error(err);
+        showStatus('Erro ao carregar Concessao_Angola_2025.geojson', true);
+    });
+
+// Carrega GeoJSON de Poços (pontos)
+const pocosPromise = fetch('./pocos_angola.geojson?cb=' + Date.now())
+    .then(r => {
+        if (!r.ok) throw new Error('Falha ao carregar pocos_angola.geojson');
+        updateProgress('Carregando Poços...', 70);
+        return r.json();
+    })
+    .then(geojson => {
+        pocosData = geojson;
+        updateProgress('Dados de Poços carregados', 90);
+        console.log('Poços dados carregados:', geojson.features?.length || 0, 'features');
+        return geojson;
     })
     .catch(err => {
         console.error(err);
@@ -246,37 +262,21 @@ const overlayMaps = {
     'Poços (cluster)': pocosCluster
 };
 L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
-// expõe camada para controle de opacidade
+// expõe camadas para controle de opacidade e renderização
 window.concessaoLayer = concessaoLayer;
+window.pocosCluster = pocosCluster;
 
-// Ajusta a visão para cobrir os dados quando ambos carregarem
+// Quando ambos os dados estiverem carregados, inicia renderização
 Promise.allSettled([concessaoPromise, pocosPromise]).then(results => {
-    const layers = results
-        .filter(r => r.status === 'fulfilled' && r.value)
-        .map(r => r.value);
-    if (layers.length > 0) {
-        try {
-            const group = L.featureGroup(layers);
-            const bounds = group.getBounds();
-            if (bounds.isValid()) {
-                map.fitBounds(bounds.pad(0.1));
-            }
-        } catch (_) {
-            // silencioso
-        }
+    const allLoaded = results.every(r => r.status === 'fulfilled');
+    if (allLoaded && concessaoData && pocosData) {
+        // Aguarda um pouco para garantir que o mapa está pronto
+        setTimeout(() => {
+            loadAndRenderLayers();
+        }, 500);
+    } else {
+        showStatus('Erro ao carregar dados.', true);
     }
-    showStatus('Camadas carregadas!', false);
-    isLoadingInitial = false;
-    
-    // Esconde banner após 2 segundos
-    setTimeout(() => {
-        const banner = document.getElementById('status-banner');
-        if (banner) {
-            banner.style.transition = 'opacity 0.5s';
-            banner.style.opacity = '0';
-            setTimeout(() => banner.style.display = 'none', 500);
-        }
-    }, 2000);
 }).catch(() => {
     showStatus('Erro ao carregar camadas.', true);
 });
