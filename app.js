@@ -136,83 +136,44 @@ const concessaoPromise = fetch('./Concessao_Angola_2025.geojson?cb=' + Date.now(
     })
     .then(geojson => {
         updateProgress('Processando Concessões...', 50);
-        // Processa em chunks MUITO pequenos com delay maior para não travar UI
-        const features = geojson.features || [];
-        const chunkSize = 5; // chunks muito pequenos
-        let processed = 0;
-        const total = features.length;
-        
-        function processChunk(start) {
-            const end = Math.min(start + chunkSize, total);
-            
-            // Processa chunk atual
-            for (let i = start; i < end; i++) {
-                try {
-                    const feature = features[i];
-                    const layerEl = L.geoJSON(feature, {
-                        style: concessaoStyle,
-                        pane: 'paneConcessao',
-                        onEachFeature: (f, l) => {
-                            l.feature = f; // guarda referência da feature
-                            l.bindPopup(buildPopupContent(f.properties));
-                            // Só cria rótulos após carregamento inicial para não travar
-                            if (!isLoadingInitial) {
-                                const nome = getConcessaoNome(f.properties);
-                                if (nome && map.getZoom() >= 7) {
-                                    l.bindTooltip(String(nome), {
-                                        permanent: true,
-                                        direction: 'center',
-                                        className: 'label-concessao'
-                                    });
-                                }
-                            }
-                            l.on('mouseover', () => l.setStyle({ weight: 3, fillOpacity: 0.35 }));
-                            l.on('mouseout', () => l.setStyle(concessaoStyle));
-                        }
-                    });
-                    concessaoLayer.addLayer(layerEl);
-                } catch (e) {
-                    console.warn('Erro ao processar feature:', i, e);
-                }
+        // Carrega tudo de uma vez usando L.geoJSON (otimizado) mas sem tooltips/popups inicialmente
+        const layer = L.geoJSON(geojson, {
+            style: concessaoStyle,
+            pane: 'paneConcessao',
+            onEachFeature: (f, l) => {
+                l.feature = f; // guarda referência
+                // Popup e tooltip serão adicionados depois
+                l.on('mouseover', () => l.setStyle({ weight: 3, fillOpacity: 0.35 }));
+                l.on('mouseout', () => l.setStyle(concessaoStyle));
             }
-            
-            processed = end;
-            const percent = 50 + Math.floor((processed / total) * 20); // 50-70%
-            updateProgress(`Concessões: ${processed}/${total}`, percent);
-            
-            // Continua processamento com delay maior para não bloquear UI
-            if (processed < total) {
-                // Delay de 16ms (1 frame a 60fps) para dar tempo ao navegador
-                setTimeout(() => {
-                    // Usa requestIdleCallback se disponível, senão setTimeout
-                    if (window.requestIdleCallback) {
-                        requestIdleCallback(() => processChunk(end), { timeout: 50 });
-                    } else {
-                        requestAnimationFrame(() => processChunk(end));
-                    }
-                }, 16);
-            } else {
-                updateProgress('Concessões carregadas', 70);
-                setTimeout(() => {
-                    try {
-                        const b = concessaoLayer.getBounds();
-                        if (b && b.isValid()) map.fitBounds(b.pad(0.1));
-                    } catch (_) {}
-                    console.log('Concessao carregada:', processed, 'geometrias');
-                }, 100);
-            }
-        }
+        });
         
-        // Inicia processamento assíncrono após um pequeno delay
+        concessaoLayer.addLayer(layer);
+        updateProgress('Concessões carregadas', 70);
+        
+        // Adiciona popups e tooltips depois de forma assíncrona
         setTimeout(() => {
-            if (window.requestIdleCallback) {
-                requestIdleCallback(() => processChunk(0), { timeout: 100 });
-            } else {
-                requestAnimationFrame(() => processChunk(0));
-            }
-        }, 100);
+            layer.eachLayer(l => {
+                if (l.feature) {
+                    l.bindPopup(buildPopupContent(l.feature.properties));
+                    const nome = getConcessaoNome(l.feature.properties);
+                    if (nome && map.getZoom() >= 7) {
+                        l.bindTooltip(String(nome), {
+                            permanent: true,
+                            direction: 'center',
+                            className: 'label-concessao'
+                        });
+                    }
+                }
+            });
+        }, 500);
         
-        return concessaoLayer;
+        try {
+            const b = layer.getBounds();
+            if (b && b.isValid()) map.fitBounds(b.pad(0.1));
+        } catch (_) {}
+        console.log('Concessao carregada:', layer.getLayers().length, 'geometrias');
+        return layer;
     })
     .catch(err => {
         console.error(err);
@@ -228,79 +189,47 @@ const pocosPromise = fetch('./pocos_angola.geojson?cb=' + Date.now())
     })
     .then(geojson => {
         updateProgress('Processando Poços...', 80);
-        // Processa poços em chunks menores com delay
-        const features = geojson.features || [];
-        const chunkSize = 20; // chunks menores para não travar
-        let processed = 0;
-        const total = features.length;
-        
-        function processChunk(start) {
-            const end = Math.min(start + chunkSize, total);
-            
-            // Processa chunk atual
-            for (let i = start; i < end; i++) {
-                try {
-                    const feature = features[i];
-                    const marker = L.circleMarker(
-                        [feature.geometry.coordinates[1], feature.geometry.coordinates[0]], 
-                        pocosStyle
-                    );
-                    marker.feature = feature; // guarda referência da feature
-                    marker.bindPopup(buildPopupContent(feature.properties));
-                    // Só cria rótulos após carregamento inicial
-                    if (!isLoadingInitial) {
-                        const nome = getPocoNome(feature.properties);
-                        if (nome && map.getZoom() >= 7) {
-                            marker.bindTooltip(String(nome), {
-                                permanent: true,
-                                direction: 'top',
-                                offset: [0, -6],
-                                className: 'label-pocos'
-                            });
-                        }
-                    }
-                    pocosCluster.addLayer(marker);
-                } catch (e) {
-                    console.warn('Erro ao processar poço:', i, e);
-                }
+        // Carrega tudo de uma vez usando L.geoJSON (otimizado) mas sem tooltips/popups inicialmente
+        const layer = L.geoJSON(geojson, {
+            pane: 'panePocos',
+            pointToLayer: (feature, latlng) => {
+                const marker = L.circleMarker(latlng, pocosStyle);
+                marker.feature = feature; // guarda referência
+                return marker;
+            },
+            onEachFeature: (f, l) => {
+                // Popup e tooltip serão adicionados depois
             }
-            
-            processed = end;
-            const percent = 80 + Math.floor((processed / total) * 15); // 80-95%
-            updateProgress(`Poços: ${processed}/${total}`, percent);
-            
-            // Continua processamento com delay maior
-            if (processed < total) {
-                setTimeout(() => {
-                    if (window.requestIdleCallback) {
-                        requestIdleCallback(() => processChunk(end), { timeout: 50 });
-                    } else {
-                        requestAnimationFrame(() => processChunk(end));
-                    }
-                }, 16);
-            } else {
-                pocosCluster.bringToFront();
-                updateProgress('Poços carregados', 95);
-                setTimeout(() => {
-                    try {
-                        const b = pocosCluster.getBounds();
-                        if (b && b.isValid()) map.fitBounds(b.pad(0.1));
-                    } catch (_) {}
-                    console.log('Poços carregados:', processed, 'pontos');
-                }, 100);
-            }
-        }
+        });
         
-        // Inicia processamento assíncrono após delay
+        pocosCluster.addLayer(layer);
+        pocosCluster.bringToFront();
+        updateProgress('Poços carregados', 95);
+        
+        // Adiciona popups e tooltips depois de forma assíncrona
         setTimeout(() => {
-            if (window.requestIdleCallback) {
-                requestIdleCallback(() => processChunk(0), { timeout: 100 });
-            } else {
-                requestAnimationFrame(() => processChunk(0));
-            }
-        }, 100);
+            layer.eachLayer(m => {
+                if (m.feature) {
+                    m.bindPopup(buildPopupContent(m.feature.properties));
+                    const nome = getPocoNome(m.feature.properties);
+                    if (nome && map.getZoom() >= 7) {
+                        m.bindTooltip(String(nome), {
+                            permanent: true,
+                            direction: 'top',
+                            offset: [0, -6],
+                            className: 'label-pocos'
+                        });
+                    }
+                }
+            });
+        }, 500);
         
-        return pocosCluster;
+        try {
+            const b = layer.getBounds();
+            if (b && b.isValid()) map.fitBounds(b.pad(0.1));
+        } catch (_) {}
+        console.log('Poços carregados:', layer.getLayers().length, 'pontos');
+        return layer;
     })
     .catch(err => {
         console.error(err);
@@ -337,43 +266,7 @@ Promise.allSettled([concessaoPromise, pocosPromise]).then(results => {
         }
     }
     showStatus('Camadas carregadas!', false);
-    // Marca que carregamento inicial terminou e adiciona rótulos
     isLoadingInitial = false;
-    
-    // Adiciona rótulos agora que tudo carregou
-    setTimeout(() => {
-        concessaoLayer.eachLayer(l => {
-            if (!l.getTooltip()) {
-                const props = l.feature?.properties;
-                if (props && map.getZoom() >= 7) {
-                    const nome = getConcessaoNome(props);
-                    if (nome) {
-                        l.bindTooltip(String(nome), {
-                            permanent: true,
-                            direction: 'center',
-                            className: 'label-concessao'
-                        });
-                    }
-                }
-            }
-        });
-        pocosCluster.eachLayer(m => {
-            if (!m.getTooltip()) {
-                const props = m.feature?.properties;
-                if (props && map.getZoom() >= 7) {
-                    const nome = getPocoNome(props);
-                    if (nome) {
-                        m.bindTooltip(String(nome), {
-                            permanent: true,
-                            direction: 'top',
-                            offset: [0, -6],
-                            className: 'label-pocos'
-                        });
-                    }
-                }
-            }
-        });
-    }, 500);
     
     // Esconde banner após 2 segundos
     setTimeout(() => {
